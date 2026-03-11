@@ -7,17 +7,13 @@ function buildPrompt(sentences) {
   return [
     "You are a language analysis tool.",
     "",
-    "Determine whether each sentence contains emotionally loaded",
-    "or biased language such as exaggeration, stereotyping,",
-    "sweeping generalizations, or manipulative wording.",
+    "Identify which sentences contain emotionally loaded or biased language",
+    "such as exaggeration, stereotyping, sweeping generalizations, or manipulative wording.",
     "",
-    "Return ONLY JSON.",
+    "Return ONLY a JSON array of the 1-based indices of biased sentences.",
+    "If none are biased, return [].",
     "",
-    "Format:",
-    "[",
-    '  { "sentence": "...", "biased": true },',
-    '  { "sentence": "...", "biased": false }',
-    "]",
+    "Example: [2, 7, 15]",
     "",
     "Sentences:",
     ...sentences.map((sentence, index) => `${index + 1}. ${sentence}`)
@@ -28,14 +24,12 @@ function stripCodeFences(text) {
   return text.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "").trim();
 }
 
-function normalizeResults(sentences, parsedResults) {
-  return sentences.map((sentence, index) => {
-    const result = Array.isArray(parsedResults) ? parsedResults[index] : null;
-    return {
-      sentence,
-      biased: Boolean(result?.biased)
-    };
-  });
+function normalizeResults(sentences, biasedIndices) {
+  const indexSet = new Set(Array.isArray(biasedIndices) ? biasedIndices : []);
+  return sentences.map((sentence, index) => ({
+    sentence,
+    biased: indexSet.has(index + 1)
+  }));
 }
 
 async function classifySentences(sentences) {
@@ -54,7 +48,7 @@ async function classifySentences(sentences) {
       messages: [
         {
           role: "system",
-          content: "You classify sentences for biased or emotionally loaded language and respond with JSON only."
+          content: "You identify biased or emotionally loaded sentences and respond with a JSON array of their 1-based indices only."
         },
         {
           role: "user",
