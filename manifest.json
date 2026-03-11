@@ -4,7 +4,7 @@
   "version": "1.0.0",
   "description": "A minimal prototype for highlighting potentially biased or emotionally loaded language on webpages.",
   "permissions": ["activeTab", "scripting"],
-  "host_permissions": ["https://api.openai.com/*"],
+  "host_permissions": ["https://api.openai.com/*", "http://127.0.0.1/*"],
   "background": {
     "service_worker": "background.js"
   },
