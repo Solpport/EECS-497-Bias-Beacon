@@ -27,6 +27,11 @@
   color: #ffffff;
 }
 
+.popup-card button:disabled {
+  background: #94a3b8;
+  cursor: wait;
+}
+
 .popup-card button:hover {
   background: #1e40af;
 }

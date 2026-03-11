@@ -1,22 +1,5 @@
-const BIAS_BEACON_FLAG = "data-bias-beacon-processed";
 const ORIGINAL_TEXT_ATTR = "data-bias-beacon-original-text";
 const TOOLTIP_TEXT = "This sentence may contain emotionally loaded or biased language.";
-const KEYWORDS = [
-  "outrageous",
-  "shocking",
-  "they all",
-  "those people",
-  "obviously",
-  "clearly",
-  "everyone knows",
-  "dangerous",
-  "radical"
-];
-
-const keywordPatterns = KEYWORDS.map((keyword) => {
-  const escapedKeyword = keyword.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  return new RegExp(`\\b${escapedKeyword.replace(/\s+/g, "\\s+")}\\b`, "i");
-});
 
 function isVisible(element) {
   const styles = window.getComputedStyle(element);
@@ -42,36 +25,10 @@ function splitIntoSentences(text) {
   return matches ? matches.map((sentence) => sentence.trim()).filter(Boolean) : [];
 }
 
-function sentenceContainsBias(sentence) {
-  return keywordPatterns.some((pattern) => pattern.test(sentence));
-}
-
-function buildParagraphMarkup(paragraphText) {
-  const sentences = splitIntoSentences(paragraphText);
-  if (!sentences.length) {
-    return { markup: escapeHtml(paragraphText), flaggedCount: 0 };
-  }
-
-  let flaggedCount = 0;
-  const markedSentences = sentences.map((sentence) => {
-    const escapedSentence = escapeHtml(sentence);
-    if (!sentenceContainsBias(sentence)) {
-      return escapedSentence;
-    }
-
-    flaggedCount += 1;
-    return `<span class="bias-beacon-highlight" title="${TOOLTIP_TEXT}">${escapedSentence}</span>`;
-  });
-
-  return {
-    markup: markedSentences.join(" "),
-    flaggedCount
-  };
-}
-
-function analyzePage() {
-  let totalFlagged = 0;
-  const paragraphs = document.querySelectorAll("p");
+function collectPageSentences() {
+  const paragraphs = Array.from(document.querySelectorAll("p"));
+  const paragraphData = [];
+  const sentences = [];
 
   paragraphs.forEach((paragraph) => {
     if (!isVisible(paragraph)) {
@@ -90,18 +47,78 @@ function analyzePage() {
       paragraph.setAttribute(ORIGINAL_TEXT_ATTR, paragraphText);
     }
 
-    const { markup, flaggedCount } = buildParagraphMarkup(paragraphText);
-    if (!flaggedCount) {
-      paragraph.setAttribute(BIAS_BEACON_FLAG, "true");
+    const paragraphSentences = splitIntoSentences(paragraphText);
+    if (!paragraphSentences.length) {
       return;
     }
 
-    paragraph.innerHTML = markup;
-    paragraph.setAttribute(BIAS_BEACON_FLAG, "true");
+    paragraphData.push({
+      element: paragraph,
+      text: paragraphText,
+      sentences: paragraphSentences
+    });
+
+    sentences.push(...paragraphSentences);
+  });
+
+  return {
+    paragraphData,
+    sentences
+  };
+}
+
+function buildParagraphMarkup(paragraphText, sentenceResults) {
+  const sentences = splitIntoSentences(paragraphText);
+  if (!sentences.length) {
+    return { markup: escapeHtml(paragraphText), flaggedCount: 0 };
+  }
+
+  let flaggedCount = 0;
+  const markedSentences = sentences.map((sentence, index) => {
+    const escapedSentence = escapeHtml(sentence);
+    if (!sentenceResults[index]?.biased) {
+      return escapedSentence;
+    }
+
+    flaggedCount += 1;
+    return `<span class="bias-beacon-highlight" title="${TOOLTIP_TEXT}">${escapedSentence}</span>`;
+  });
+
+  return {
+    markup: markedSentences.join(" "),
+    flaggedCount
+  };
+}
+
+function applyClassificationResults(paragraphData, results) {
+  let totalFlagged = 0;
+  let resultIndex = 0;
+
+  paragraphData.forEach(({ element, text, sentences }) => {
+    const sentenceResults = results.slice(resultIndex, resultIndex + sentences.length);
+    resultIndex += sentences.length;
+
+    const { markup, flaggedCount } = buildParagraphMarkup(text, sentenceResults);
+    element.innerHTML = markup;
     totalFlagged += flaggedCount;
   });
 
   return totalFlagged;
+}
+
+async function analyzePage() {
+  const { paragraphData, sentences } = collectPageSentences();
+  if (!sentences.length) {
+    return 0;
+  }
+
+  const response = await chrome.runtime.sendMessage({
+    type: "CLASSIFY_SENTENCES",
+    sentences
+  });
+
+  const results = Array.isArray(response?.results) ? response.results : [];
+  return applyClassificationResults(paragraphData, results);
 }
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
@@ -109,6 +126,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return;
   }
 
-  const count = analyzePage();
-  sendResponse({ count });
+  analyzePage()
+    .then((count) => {
+      sendResponse({ count });
+    })
+    .catch((error) => {
+      console.error("Bias Beacon content analysis failed:", error);
+      sendResponse({ count: 0, error: error.message });
+    });
+
+  return true;
 });
