@@ -1,1 +1,26 @@
+# Never commit API keys or other secrets.
+# Keep real credentials in local-only files such as config.js.
+
 config.js
+.env
+.env.local
+.env.development
+.env.production
+
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+node_modules/
+dist/
+build/
+.vite/
+
+.vscode/
+.idea/
+
+.DS_Store
+Thumbs.db
+
+*.log
