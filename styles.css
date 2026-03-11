@@ -42,9 +42,52 @@
   line-height: 1.4;
 }
 
+.legend {
+  margin: 12px 0 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  font-size: 12px;
+}
+
+.legend li {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.legend-swatch {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+  flex-shrink: 0;
+}
+
 .bias-beacon-highlight {
-  background-color: #fff176;
   border-radius: 3px;
   padding: 0 2px;
   cursor: help;
+}
+
+.bias-beacon-highlight--emotional {
+  background-color: #fff176; /* yellow */
+}
+
+.bias-beacon-highlight--exaggeration {
+  background-color: #ffcc80; /* orange */
+}
+
+.bias-beacon-highlight--stereotype {
+  background-color: #ef9a9a; /* red */
+}
+
+.bias-beacon-highlight--generalization {
+  background-color: #ce93d8; /* purple */
+}
+
+.bias-beacon-highlight--false-equivalence {
+  background-color: #80deea; /* teal */
 }

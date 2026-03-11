@@ -20,9 +20,15 @@ async function analyzeActiveTab() {
       return;
     }
 
-    const response = await chrome.tabs.sendMessage(activeTab.id, {
-      type: "ANALYZE_PAGE"
-    });
+    let response;
+    try {
+      response = await chrome.tabs.sendMessage(activeTab.id, { type: "ANALYZE_PAGE" });
+    } catch {
+      // Content script not yet injected (tab was open before extension loaded) — inject it now.
+      await chrome.scripting.executeScript({ target: { tabId: activeTab.id, allFrames: true }, files: ["content.js"] });
+      await chrome.scripting.insertCSS({ target: { tabId: activeTab.id, allFrames: true }, files: ["styles.css"] });
+      response = await chrome.tabs.sendMessage(activeTab.id, { type: "ANALYZE_PAGE" });
+    }
 
     const count = response?.count ?? 0;
     resultText.textContent = `${count} potentially biased sentence${count === 1 ? "" : "s"} detected.`;

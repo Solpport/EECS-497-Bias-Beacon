@@ -1,5 +1,12 @@
 const ORIGINAL_TEXT_ATTR = "data-bias-beacon-original-text";
-const TOOLTIP_TEXT = "This sentence may contain emotionally loaded or biased language.";
+
+const CATEGORY_TOOLTIPS = {
+  emotional:     "This sentence may contain emotionally loaded or manipulative language.",
+  exaggeration:  "This sentence may contain exaggeration or hyperbole.",
+  stereotype:    "This sentence may contain stereotyping or prejudice.",
+  generalization:      "This sentence may contain a sweeping generalization.",
+  "false-equivalence": "This sentence may contain a false equivalence.",
+};
 
 function isVisible(element) {
   const styles = window.getComputedStyle(element);
@@ -81,7 +88,12 @@ function buildParagraphMarkup(paragraphText, sentenceResults) {
     }
 
     flaggedCount += 1;
-    return `<span class="bias-beacon-highlight" title="${TOOLTIP_TEXT}">${escapedSentence}</span>`;
+    const result = sentenceResults[index];
+    const category = result.category ?? "emotional";
+    const categoryLabel = CATEGORY_TOOLTIPS[category] ?? CATEGORY_TOOLTIPS.emotional;
+    const tooltip = result.reason ? `${categoryLabel}\n\n${result.reason}` : categoryLabel;
+    const escapedTooltip = escapeHtml(tooltip);
+    return `<span class="bias-beacon-highlight bias-beacon-highlight--${category}" title="${escapedTooltip}">${escapedSentence}</span>`;
   });
 
   return {
@@ -121,18 +133,20 @@ async function analyzePage() {
   return applyClassificationResults(paragraphData, results);
 }
 
-chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message?.type !== "ANALYZE_PAGE") {
     return;
   }
 
+  const isTopFrame = window === window.top;
+
   analyzePage()
     .then((count) => {
-      sendResponse({ count });
+      if (isTopFrame) sendResponse({ count });
     })
     .catch((error) => {
       console.error("Bias Beacon content analysis failed:", error);
-      sendResponse({ count: 0, error: error.message });
+      if (isTopFrame) sendResponse({ count: 0, error: error.message });
     });
 
   return true;
