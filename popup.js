@@ -2,23 +2,24 @@ const analyzeButton = document.getElementById("analyzeButton");
 const resultText = document.getElementById("resultText");
 
 async function analyzeActiveTab() {
-  if (!resultText) {
+  if (!resultText || !analyzeButton) {
     return;
   }
 
+  analyzeButton.disabled = true;
   resultText.textContent = "Analyzing page...";
 
-  const [activeTab] = await chrome.tabs.query({
-    active: true,
-    currentWindow: true
-  });
-
-  if (!activeTab?.id) {
-    resultText.textContent = "No active tab available.";
-    return;
-  }
-
   try {
+    const [activeTab] = await chrome.tabs.query({
+      active: true,
+      currentWindow: true
+    });
+
+    if (!activeTab?.id) {
+      resultText.textContent = "No active tab available.";
+      return;
+    }
+
     const response = await chrome.tabs.sendMessage(activeTab.id, {
       type: "ANALYZE_PAGE"
     });
@@ -28,6 +29,8 @@ async function analyzeActiveTab() {
   } catch (error) {
     resultText.textContent = "Unable to analyze this page.";
     console.error("Bias Beacon analysis failed:", error);
+  } finally {
+    analyzeButton.disabled = false;
   }
 }
 
