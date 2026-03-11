@@ -1,5 +1,22 @@
 importScripts("config.js");
 
+// Dev auto-reload: polls watch.js server and reloads when files change.
+// Remove this block (and the host_permission for localhost) before releasing.
+(function devReload() {
+  let lastVersion = null;
+  async function poll() {
+    try {
+      const res = await fetch("http://127.0.0.1:9876");
+      const version = await res.text();
+      if (lastVersion === null) { lastVersion = version; return; }
+      if (version !== lastVersion) chrome.runtime.reload();
+    } catch {
+      // watch.js not running — silently skip
+    }
+  }
+  setInterval(poll, 1000);
+})();
+
 const OPENAI_API_URL = "https://api.openai.com/v1/chat/completions";
 const OPENAI_MODEL = "gpt-4o-mini";
 
