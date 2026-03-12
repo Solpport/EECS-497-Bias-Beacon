@@ -20,6 +20,8 @@ importScripts("config.js");
 const OPENAI_API_URL = "https://api.openai.com/v1/chat/completions";
 const OPENAI_MODEL = "gpt-4o-mini";
 
+const VALID_CATEGORIES = new Set(["emotional", "exaggeration", "stereotype", "generalization", "false-equivalence"]);
+
 function buildPrompt(sentences) {
   return [
     "You are a language analysis tool.",
@@ -201,6 +203,14 @@ function chunkArray(array, size) {
 }
 
 function normalizeResults(sentences, parsedResults) {
+  const categoryMap = new Map();
+  if (Array.isArray(parsedResults)) {
+    parsedResults.forEach((r) => {
+      if (typeof r?.index === "number" && VALID_CATEGORIES.has(r.category)) {
+        categoryMap.set(r.index, { category: r.category, reason: r.reason ?? null });
+      }
+    });
+  }
   return sentences.map((sentence, index) => {
     const result = Array.isArray(parsedResults) ? parsedResults[index] : null;
     const biasType = result?.bias_type || null;
@@ -336,7 +346,7 @@ async function classifySentences(sentences) {
   return allResults;
 }
 
-chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message?.type !== "CLASSIFY_SENTENCES") {
     return;
   }
