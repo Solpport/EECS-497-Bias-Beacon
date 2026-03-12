@@ -11,7 +11,81 @@
       <h1>Bias Beacon</h1>
       <button id="analyzeButton" type="button">Analyze Page</button>
       <p id="resultText">Click the button to scan this page.</p>
+      <section id="summarySection" class="summary-section" hidden>
+        <h2>Bias Summary</h2>
+
+        <div class="summary-grid">
+          <div class="summary-row">
+            <span>Biased Sentences</span>
+            <strong id="biasedCountValue">0</strong>
+          </div>
+          <div class="summary-row">
+            <span>Total Sentences</span>
+            <strong id="totalCountValue">0</strong>
+          </div>
+          <div class="summary-row">
+            <span>Emotional Language</span>
+            <strong id="emotionalCountValue">0</strong>
+          </div>
+          <div class="summary-row">
+            <span>Exaggeration</span>
+            <strong id="exaggerationCountValue">0</strong>
+          </div>
+          <div class="summary-row">
+            <span>Stereotype</span>
+            <strong id="stereotypeCountValue">0</strong>
+          </div>
+          <div class="summary-row">
+            <span>Generalization</span>
+            <strong id="generalizationCountValue">0</strong>
+          </div>
+          <div class="summary-row">
+            <span>False Equivalence</span>
+            <strong id="falseEquivalenceCountValue">0</strong>
+          </div>
+          <div class="summary-row">
+            <span>Overall Bias Level</span>
+            <strong id="biasLevelValue">Low bias</strong>
+          </div>
+        </div>
+
+        <div class="score-section">
+          <div class="score-header">
+            <span>Bias Score</span>
+            <strong id="biasPercentValue">0%</strong>
+          </div>
+          <div class="bias-score-track">
+            <div id="biasScoreFill" class="bias-score-fill bias-score-fill--low"></div>
+          </div>
+        </div>
+
+        <div class="legend-section">
+          <h3>Legend</h3>
+          <div class="legend-list">
+            <div class="legend-item">
+              <span class="legend-swatch legend-swatch--emotional-language"></span>
+              <span>Emotional Language</span>
+            </div>
+            <div class="legend-item">
+              <span class="legend-swatch legend-swatch--exaggeration"></span>
+              <span>Exaggeration</span>
+            </div>
+            <div class="legend-item">
+              <span class="legend-swatch legend-swatch--stereotype"></span>
+              <span>Stereotype</span>
+            </div>
+            <div class="legend-item">
+              <span class="legend-swatch legend-swatch--generalization"></span>
+              <span>Generalization</span>
+            </div>
+            <div class="legend-item">
+              <span class="legend-swatch legend-swatch--false-equivalence"></span>
+              <span>False Equivalence</span>
+            </div>
+          </div>
+        </div>
+      </section>
     </main>
     <script src="popup.js"></script>
   </body>
-  </html>
+</html>
