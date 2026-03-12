@@ -19,6 +19,8 @@ importScripts("config.js");
 
 const OPENAI_API_URL = "https://api.openai.com/v1/chat/completions";
 const OPENAI_MODEL = "gpt-4o-mini";
+const CLASSIFICATION_BATCH_SIZE = 50;
+const MAX_CONCURRENT_BATCHES = 3;
 
 const VALID_CATEGORIES = new Set(["emotional", "exaggeration", "stereotype", "generalization", "false-equivalence"]);
 
@@ -228,7 +230,6 @@ async function classifyBatch(sentences) {
     throw new Error("Set your OpenAI API key in config.js before running Bias Beacon.");
   }
 
-  console.log("Calling OpenAI for classification");
   const response = await fetch(OPENAI_API_URL, {
     method: "POST",
     headers: {
@@ -292,7 +293,6 @@ async function classifyBatch(sentences) {
   }
 
   const data = await response.json();
-  console.log("OPENAI RAW RESPONSE:", data);
 
   const parsedContainer =
     data?.output_parsed ??
@@ -314,36 +314,52 @@ async function classifyBatch(sentences) {
     bias_type: result?.bias_type === "none" ? null : result?.bias_type ?? null
   }));
 
-  console.log("Parsed classification results:", normalizedParsedResults.length);
   return normalizeResults(sentences, normalizedParsedResults);
 }
 
-async function classifySentences(sentences) {
-  const batches = chunkArray(sentences, 50);
-  let allResults = [];
+async function mapWithConcurrency(items, concurrency, iterator) {
+  const results = new Array(items.length);
+  let nextIndex = 0;
 
-  console.log("Total sentences:", sentences.length);
-  console.log("Processing batches:", batches.length);
+  async function worker() {
+    while (true) {
+      const currentIndex = nextIndex;
+      nextIndex += 1;
 
-  for (let index = 0; index < batches.length; index += 1) {
-    const batch = batches[index];
-    console.log(`Processing batch ${index + 1}/${batches.length}`);
-    console.log("Batch size:", batch.length);
+      if (currentIndex >= items.length) {
+        return;
+      }
 
-    let batchResults;
-
-    try {
-      batchResults = await classifyBatch(batch);
-    } catch (error) {
-      console.error(`Batch ${index + 1} failed, falling back to unbiased results:`, error);
-      batchResults = normalizeResults(batch, []);
+      results[currentIndex] = await iterator(items[currentIndex], currentIndex);
     }
-
-    allResults = allResults.concat(batchResults);
   }
 
-  console.log("Final results length:", allResults.length);
-  return allResults;
+  const workerCount = Math.min(concurrency, items.length);
+  await Promise.all(Array.from({ length: workerCount }, () => worker()));
+  return results;
+}
+
+async function classifySentences(sentences) {
+  const batches = chunkArray(sentences, CLASSIFICATION_BATCH_SIZE);
+
+  if (!batches.length) {
+    return [];
+  }
+
+  const batchResults = await mapWithConcurrency(
+    batches,
+    MAX_CONCURRENT_BATCHES,
+    async (batch, index) => {
+      try {
+        return await classifyBatch(batch);
+      } catch (error) {
+        console.error(`Batch ${index + 1} failed, falling back to unbiased results:`, error);
+        return normalizeResults(batch, []);
+      }
+    }
+  );
+
+  return batchResults.flat();
 }
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {

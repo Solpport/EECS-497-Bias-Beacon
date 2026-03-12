@@ -21,6 +21,8 @@ if (!globalThis.__biasBeaconContentInitialized) {
     };
   }
 
+  const CATEGORY_KEYS = Object.keys(createEmptyCategoryCounts());
+
   function getHighlightClassName(biasType) {
     return `bias-beacon-highlight--${biasType.replace(/_/g, "-")}`;
   }
@@ -92,7 +94,6 @@ if (!globalThis.__biasBeaconContentInitialized) {
 
       paragraphData.push({
         element: paragraph,
-        text: paragraphText,
         sentences: paragraphSentences
       });
 
@@ -105,17 +106,16 @@ if (!globalThis.__biasBeaconContentInitialized) {
     };
   }
 
-  function buildParagraphMarkup(paragraphText, sentenceResults) {
-    const sentences = splitIntoSentences(paragraphText);
+  function buildParagraphMarkup(sentences, results, startIndex) {
     if (!sentences.length) {
-      return { markup: escapeHtml(paragraphText), flaggedCount: 0, categoryCounts: createEmptyCategoryCounts() };
+      return { markup: "", flaggedCount: 0, categoryCounts: createEmptyCategoryCounts() };
     }
 
     let flaggedCount = 0;
     const categoryCounts = createEmptyCategoryCounts();
     const markedSentences = sentences.map((sentence, index) => {
       const escapedSentence = escapeHtml(sentence);
-      const type = sentenceResults[index]?.bias_type;
+      const type = results[startIndex + index]?.bias_type;
 
       if (!type) {
         return escapedSentence;
@@ -143,15 +143,17 @@ if (!globalThis.__biasBeaconContentInitialized) {
     let resultIndex = 0;
     const categoryCounts = createEmptyCategoryCounts();
 
-    paragraphData.forEach(({ element, text, sentences }) => {
-      const sentenceResults = results.slice(resultIndex, resultIndex + sentences.length);
+    paragraphData.forEach(({ element, sentences }) => {
+      const { markup, flaggedCount, categoryCounts: paragraphCategoryCounts } = buildParagraphMarkup(
+        sentences,
+        results,
+        resultIndex
+      );
       resultIndex += sentences.length;
-
-      const { markup, flaggedCount, categoryCounts: paragraphCategoryCounts } = buildParagraphMarkup(text, sentenceResults);
       element.innerHTML = markup;
       totalFlagged += flaggedCount;
 
-      Object.keys(categoryCounts).forEach((category) => {
+      CATEGORY_KEYS.forEach((category) => {
         categoryCounts[category] += paragraphCategoryCounts[category];
       });
     });
@@ -174,15 +176,12 @@ if (!globalThis.__biasBeaconContentInitialized) {
       };
     }
 
-    console.log("Sending sentences to background:", sentences.length);
     const response = await chrome.runtime.sendMessage({
       type: "CLASSIFY_SENTENCES",
       sentences
     });
-    console.log("Sentences sent for classification:", sentences);
 
     const results = Array.isArray(response?.results) ? response.results : [];
-    console.log("Results received from background:", results);
     const analysis = applyClassificationResults(paragraphData, results);
     const totalSentences = sentences.length;
     const biasScore = analysis.count / totalSentences;
@@ -200,12 +199,10 @@ if (!globalThis.__biasBeaconContentInitialized) {
     if (message?.type !== "ANALYZE_PAGE") {
       return;
     }
-    console.log("Received ANALYZE_PAGE message from popup");
 
     Promise.resolve()
       .then(() => analyzePage())
       .then((summary) => {
-        console.log("Returning analysis summary:", summary);
         sendResponse(summary);
       })
       .catch((error) => {
@@ -218,7 +215,6 @@ if (!globalThis.__biasBeaconContentInitialized) {
           categoryCounts: createEmptyCategoryCounts(),
           error: error.message
         };
-        console.log("Returning analysis summary:", fallbackResponse);
         sendResponse(fallbackResponse);
       });
 
