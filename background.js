@@ -26,18 +26,23 @@ function buildPrompt(sentences) {
   return [
     "You are a language analysis tool.",
     "",
-    "Identify which sentences contain biased or emotionally loaded language.",
-    "For each biased sentence, assign exactly one category:",
-    "  - emotional: emotionally charged or manipulative wording",
-    "  - exaggeration: hyperbole or overstating facts",
-    "  - stereotype: stereotyping or prejudice toward a group",
-    "  - generalization: sweeping generalizations (e.g. 'everyone knows', 'they all')",
-    "  - false-equivalence: comparing two unequal things as if they are equivalent",
+    "Classify each sentence for biased or emotionally loaded language.",
+    "Use these bias types when a sentence is biased:",
+    "- emotional_language",
+    "- exaggeration",
+    "- stereotype",
+    "- generalization",
+    "- false_equivalence",
     "",
-    "Return ONLY a JSON array for biased sentences. If none are biased, return [].",
-    "Each entry must include: index (1-based), category, and reason (one concise sentence explaining why).",
+    "Return ONLY JSON.",
+    "Return one object for every sentence in the same order as the input.",
+    "If a sentence is not biased, set biased to false and bias_type to null.",
     "",
-    'Example: [{ "index": 2, "category": "stereotype", "reason": "Generalizes behavior to an entire ethnic group." }, { "index": 7, "category": "emotional", "reason": "Uses alarming language to provoke fear." }]',
+    "Format:",
+    "[",
+    '  { "sentence": "...", "biased": true, "bias_type": "stereotype" },',
+    '  { "sentence": "...", "biased": false, "bias_type": null }',
+    "]",
     "",
     "Sentences:",
     ...sentences.map((sentence, index) => `${index + 1}. ${sentence}`)
@@ -46,6 +51,155 @@ function buildPrompt(sentences) {
 
 function stripCodeFences(text) {
   return text.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "").trim();
+}
+
+function extractJSONArray(text) {
+  const start = text.indexOf("[");
+  const end = text.lastIndexOf("]");
+  if (start === -1 || end === -1 || end <= start) {
+    return text;
+  }
+
+  return text.slice(start, end + 1);
+}
+
+function tryRepairTruncatedArray(text) {
+  const arrayText = extractJSONArray(text);
+  if (!arrayText.trim().startsWith("[")) {
+    return arrayText;
+  }
+
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  let lastSafeIndex = -1;
+
+  for (let index = 0; index < arrayText.length; index += 1) {
+    const char = arrayText[index];
+
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+      } else if (char === "\\") {
+        escaped = true;
+      } else if (char === "\"") {
+        inString = false;
+      }
+      continue;
+    }
+
+    if (char === "\"") {
+      inString = true;
+      continue;
+    }
+
+    if (char === "{") {
+      depth += 1;
+    } else if (char === "}") {
+      depth -= 1;
+      if (depth === 0) {
+        lastSafeIndex = index;
+      }
+    }
+  }
+
+  if (lastSafeIndex === -1) {
+    return "[]";
+  }
+
+  return `${arrayText.slice(0, lastSafeIndex + 1)}]`;
+}
+
+function extractJSONObjectStrings(text) {
+  const source = extractJSONArray(text);
+  const objects = [];
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  let startIndex = -1;
+
+  for (let index = 0; index < source.length; index += 1) {
+    const char = source[index];
+
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+      } else if (char === "\\") {
+        escaped = true;
+      } else if (char === "\"") {
+        inString = false;
+      }
+      continue;
+    }
+
+    if (char === "\"") {
+      inString = true;
+      continue;
+    }
+
+    if (char === "{") {
+      if (depth === 0) {
+        startIndex = index;
+      }
+      depth += 1;
+      continue;
+    }
+
+    if (char === "}") {
+      depth -= 1;
+      if (depth === 0 && startIndex !== -1) {
+        objects.push(source.slice(startIndex, index + 1));
+        startIndex = -1;
+      }
+    }
+  }
+
+  return objects;
+}
+
+function parseClassificationResults(messageText) {
+  const strippedText = stripCodeFences(messageText);
+
+  try {
+    return JSON.parse(strippedText);
+  } catch (error) {
+    console.warn("Initial classification JSON parse failed:", error);
+  }
+
+  const extractedArray = extractJSONArray(strippedText);
+  try {
+    return JSON.parse(extractedArray);
+  } catch (error) {
+    console.warn("Extracted classification JSON parse failed:", error);
+  }
+
+  const repairedArray = tryRepairTruncatedArray(strippedText);
+  try {
+    return JSON.parse(repairedArray);
+  } catch (error) {
+    console.warn("Repaired classification JSON parse failed:", error);
+  }
+
+  const objectStrings = extractJSONObjectStrings(strippedText);
+  const recoveredResults = objectStrings.reduce((results, objectText) => {
+    try {
+      results.push(JSON.parse(objectText));
+    } catch (error) {
+      console.warn("Skipping malformed classification object:", error);
+    }
+    return results;
+  }, []);
+
+  console.warn("Recovered classification objects:", recoveredResults.length);
+  return recoveredResults;
+}
+
+function chunkArray(array, size) {
+  const chunks = [];
+  for (let index = 0; index < array.length; index += size) {
+    chunks.push(array.slice(index, index + size));
+  }
+  return chunks;
 }
 
 function normalizeResults(sentences, parsedResults) {
@@ -58,16 +212,23 @@ function normalizeResults(sentences, parsedResults) {
     });
   }
   return sentences.map((sentence, index) => {
-    const entry = categoryMap.get(index + 1) ?? null;
-    return { sentence, biased: entry !== null, category: entry?.category ?? null, reason: entry?.reason ?? null };
+    const result = Array.isArray(parsedResults) ? parsedResults[index] : null;
+    const biasType = result?.bias_type || null;
+
+    return {
+      sentence,
+      biased: Boolean(biasType),
+      bias_type: biasType
+    };
   });
 }
 
-async function classifySentences(sentences) {
+async function classifyBatch(sentences) {
   if (!OPENAI_API_KEY || OPENAI_API_KEY === "YOUR_OPENAI_API_KEY") {
     throw new Error("Set your OpenAI API key in config.js before running Bias Beacon.");
   }
 
+  console.log("Calling OpenAI for classification");
   const response = await fetch(OPENAI_API_URL, {
     method: "POST",
     headers: {
@@ -79,13 +240,48 @@ async function classifySentences(sentences) {
       messages: [
         {
           role: "system",
-          content: "You identify biased or emotionally loaded sentences and respond with a JSON array containing each sentence's 1-based index, bias category, and a brief reason."
+          content: "You classify sentences for bias categories and respond with JSON only."
         },
         {
           role: "user",
           content: buildPrompt(sentences)
         }
       ],
+      response_format: {
+        type: "json_schema",
+        json_schema: {
+          name: "bias_classification",
+          schema: {
+            type: "object",
+            properties: {
+              results: {
+                type: "array",
+                items: {
+                  type: "object",
+                  properties: {
+                    sentence: { type: "string" },
+                    bias_type: {
+                      type: "string",
+                      enum: [
+                        "emotional_language",
+                        "exaggeration",
+                        "stereotype",
+                        "generalization",
+                        "false_equivalence",
+                        "none"
+                      ]
+                    }
+                  },
+                  required: ["sentence", "bias_type"],
+                  additionalProperties: false
+                }
+              }
+            },
+            required: ["results"],
+            additionalProperties: false
+          }
+        }
+      },
       temperature: 0
     })
   });
@@ -96,9 +292,58 @@ async function classifySentences(sentences) {
   }
 
   const data = await response.json();
-  const messageText = data?.choices?.[0]?.message?.content ?? "[]";
-  const parsedResults = JSON.parse(stripCodeFences(messageText));
-  return normalizeResults(sentences, parsedResults);
+  console.log("OPENAI RAW RESPONSE:", data);
+
+  const parsedContainer =
+    data?.output_parsed ??
+    data?.choices?.[0]?.message?.parsed ??
+    null;
+
+  let parsedResults = parsedContainer?.results;
+
+  if (!Array.isArray(parsedResults)) {
+    const messageText = data?.choices?.[0]?.message?.content ?? "[]";
+    const fallbackParsed = parseClassificationResults(messageText);
+    parsedResults = Array.isArray(fallbackParsed?.results)
+      ? fallbackParsed.results
+      : fallbackParsed;
+  }
+
+  const normalizedParsedResults = (Array.isArray(parsedResults) ? parsedResults : []).map((result) => ({
+    sentence: result?.sentence ?? "",
+    bias_type: result?.bias_type === "none" ? null : result?.bias_type ?? null
+  }));
+
+  console.log("Parsed classification results:", normalizedParsedResults.length);
+  return normalizeResults(sentences, normalizedParsedResults);
+}
+
+async function classifySentences(sentences) {
+  const batches = chunkArray(sentences, 50);
+  let allResults = [];
+
+  console.log("Total sentences:", sentences.length);
+  console.log("Processing batches:", batches.length);
+
+  for (let index = 0; index < batches.length; index += 1) {
+    const batch = batches[index];
+    console.log(`Processing batch ${index + 1}/${batches.length}`);
+    console.log("Batch size:", batch.length);
+
+    let batchResults;
+
+    try {
+      batchResults = await classifyBatch(batch);
+    } catch (error) {
+      console.error(`Batch ${index + 1} failed, falling back to unbiased results:`, error);
+      batchResults = normalizeResults(batch, []);
+    }
+
+    allResults = allResults.concat(batchResults);
+  }
+
+  console.log("Final results length:", allResults.length);
+  return allResults;
 }
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
