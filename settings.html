@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Bias Beacon Settings</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body class="bias-beacon-settings">
+    <main class="settings-card">
+      <h1>Bias Beacon Settings</h1>
+
+      <section class="settings-section">
+        <h2>API Configuration</h2>
+        <div class="setting-group">
+          <label for="apiKey">OpenAI API Key</label>
+          <div class="api-key-row">
+            <input type="password" id="apiKey" placeholder="sk-..." autocomplete="off" />
+            <button id="toggleApiKey" type="button" title="Show/Hide">Show</button>
+          </div>
+          <p id="apiKeyStatus" class="setting-hint"></p>
+        </div>
+      </section>
+
+      <section class="settings-section">
+        <h2>Analysis</h2>
+        <div class="setting-group">
+          <label for="sensitivity">Sensitivity Level</label>
+          <div class="sensitivity-row">
+            <input type="range" id="sensitivity" min="0" max="2" step="1" value="1" />
+            <span id="sensitivityLabel">Medium</span>
+          </div>
+          <p class="setting-hint">Low = only strong bias. Medium = standard. High = flag subtle bias too.</p>
+        </div>
+
+        <div class="setting-group">
+          <label>Bias Categories</label>
+          <div class="category-toggles">
+            <label class="toggle-label">
+              <input type="checkbox" id="cat_emotional_language" checked />
+              Emotional Language
+            </label>
+            <label class="toggle-label">
+              <input type="checkbox" id="cat_exaggeration" checked />
+              Exaggeration
+            </label>
+            <label class="toggle-label">
+              <input type="checkbox" id="cat_stereotype" checked />
+              Stereotype
+            </label>
+            <label class="toggle-label">
+              <input type="checkbox" id="cat_generalization" checked />
+              Generalization
+            </label>
+            <label class="toggle-label">
+              <input type="checkbox" id="cat_false_equivalence" checked />
+              False Equivalence
+            </label>
+          </div>
+        </div>
+      </section>
+
+      <section class="settings-section">
+        <h2>Display</h2>
+        <div class="setting-group">
+          <label>Highlight Style</label>
+          <div class="highlight-style-options">
+            <label class="toggle-label">
+              <input type="radio" name="highlightStyle" value="highlight" checked />
+              <span class="style-preview style-preview--highlight">Highlight</span>
+            </label>
+            <label class="toggle-label">
+              <input type="radio" name="highlightStyle" value="underline" />
+              <span class="style-preview style-preview--underline">Underline</span>
+            </label>
+            <label class="toggle-label">
+              <input type="radio" name="highlightStyle" value="border" />
+              <span class="style-preview style-preview--border">Border</span>
+            </label>
+          </div>
+        </div>
+      </section>
+
+      <section class="settings-section">
+        <h2>Behavior</h2>
+        <div class="setting-group">
+          <label class="toggle-label">
+            <input type="checkbox" id="autoAnalyze" />
+            Auto-analyze pages on load
+          </label>
+          <p class="setting-hint">Automatically run bias analysis when you visit a page.</p>
+        </div>
+
+        <div class="setting-group">
+          <label for="domainWhitelist">Domain Whitelist</label>
+          <textarea
+            id="domainWhitelist"
+            rows="4"
+            placeholder="Only auto-analyze these domains (one per line):&#10;cnn.com&#10;nytimes.com&#10;bbc.com"
+          ></textarea>
+          <p class="setting-hint">Leave empty to auto-analyze all sites.</p>
+        </div>
+      </section>
+
+      <div class="settings-actions">
+        <button id="saveButton" type="button">Save Settings</button>
+        <button id="resetButton" type="button" class="btn-secondary">Reset to Defaults</button>
+      </div>
+      <p id="saveStatus" class="save-status"></p>
+    </main>
+    <script src="settings.js"></script>
+  </body>
+</html>

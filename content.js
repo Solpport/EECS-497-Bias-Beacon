@@ -23,6 +23,27 @@ if (!globalThis.__biasBeaconContentInitialized) {
 
   const CATEGORY_KEYS = Object.keys(createEmptyCategoryCounts());
 
+  async function getSettings() {
+    try {
+      const result = await chrome.storage.sync.get("settings");
+      return result.settings || {};
+    } catch {
+      return {};
+    }
+  }
+
+  function isDomainWhitelisted(whitelist, hostname) {
+    if (!whitelist || !whitelist.trim()) {
+      return true;
+    }
+    const domains = whitelist.split("\n").map((d) => d.trim().toLowerCase()).filter(Boolean);
+    if (!domains.length) {
+      return true;
+    }
+    const host = hostname.toLowerCase();
+    return domains.some((domain) => host === domain || host.endsWith("." + domain));
+  }
+
   function getHighlightClassName(biasType) {
     return `bias-beacon-highlight--${biasType.replace(/_/g, "-")}`;
   }
@@ -106,7 +127,7 @@ if (!globalThis.__biasBeaconContentInitialized) {
     };
   }
 
-  function buildParagraphMarkup(sentences, results, startIndex) {
+  function buildParagraphMarkup(sentences, results, startIndex, enabledCategories) {
     if (!sentences.length) {
       return { markup: "", flaggedCount: 0, categoryCounts: createEmptyCategoryCounts() };
     }
@@ -117,7 +138,7 @@ if (!globalThis.__biasBeaconContentInitialized) {
       const escapedSentence = escapeHtml(sentence);
       const type = results[startIndex + index]?.bias_type;
 
-      if (!type) {
+      if (!type || (enabledCategories && !enabledCategories.includes(type))) {
         return escapedSentence;
       }
 
@@ -138,7 +159,7 @@ if (!globalThis.__biasBeaconContentInitialized) {
     };
   }
 
-  function applyClassificationResults(paragraphData, results) {
+  function applyClassificationResults(paragraphData, results, enabledCategories) {
     let totalFlagged = 0;
     let resultIndex = 0;
     const categoryCounts = createEmptyCategoryCounts();
@@ -147,7 +168,8 @@ if (!globalThis.__biasBeaconContentInitialized) {
       const { markup, flaggedCount, categoryCounts: paragraphCategoryCounts } = buildParagraphMarkup(
         sentences,
         results,
-        resultIndex
+        resultIndex,
+        enabledCategories
       );
       resultIndex += sentences.length;
       element.innerHTML = markup;
@@ -165,6 +187,17 @@ if (!globalThis.__biasBeaconContentInitialized) {
   }
 
   async function analyzePage() {
+    const settings = await getSettings();
+
+    // Apply highlight style to the document
+    const highlightStyle = settings.highlightStyle || "highlight";
+    document.documentElement.dataset.biasBeaconStyle = highlightStyle;
+
+    // Determine enabled categories
+    const enabledCategories = settings.categories
+      ? CATEGORY_KEYS.filter((key) => settings.categories[key] !== false)
+      : CATEGORY_KEYS;
+
     const { paragraphData, sentences } = collectPageSentences();
     if (!sentences.length) {
       return {
@@ -172,7 +205,8 @@ if (!globalThis.__biasBeaconContentInitialized) {
         totalSentences: 0,
         biasScore: 0,
         biasLevel: "Low bias",
-        categoryCounts: createEmptyCategoryCounts()
+        categoryCounts: createEmptyCategoryCounts(),
+        detailedResults: []
       };
     }
 
@@ -182,17 +216,35 @@ if (!globalThis.__biasBeaconContentInitialized) {
     });
 
     const results = Array.isArray(response?.results) ? response.results : [];
-    const analysis = applyClassificationResults(paragraphData, results);
+    const analysis = applyClassificationResults(paragraphData, results, enabledCategories);
     const totalSentences = sentences.length;
     const biasScore = analysis.count / totalSentences;
 
-    return {
+    // Build detailed results for export
+    const detailedResults = results
+      .filter((r) => r.biased && enabledCategories.includes(r.bias_type))
+      .map((r) => ({
+        sentence: r.sentence,
+        bias_type: r.bias_type
+      }));
+
+    const summary = {
       count: analysis.count,
       totalSentences,
       biasScore,
       biasLevel: getBiasLevel(biasScore),
-      categoryCounts: analysis.categoryCounts
+      categoryCounts: analysis.categoryCounts,
+      detailedResults
     };
+
+    // Set badge count for auto-analyze visibility
+    try {
+      chrome.runtime.sendMessage({ type: "SET_BADGE", count: analysis.count });
+    } catch {
+      // Badge update is best-effort
+    }
+
+    return summary;
   }
 
   chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
@@ -220,4 +272,23 @@ if (!globalThis.__biasBeaconContentInitialized) {
 
     return true;
   });
+
+  // Auto-analyze on page load if enabled in settings
+  (async function maybeAutoAnalyze() {
+    if (window !== window.top) {
+      return;
+    }
+    try {
+      const settings = await getSettings();
+      if (!settings.autoAnalyze) {
+        return;
+      }
+      if (!isDomainWhitelisted(settings.domainWhitelist, window.location.hostname)) {
+        return;
+      }
+      await analyzePage();
+    } catch (error) {
+      console.error("Bias Beacon auto-analyze failed:", error);
+    }
+  })();
 }

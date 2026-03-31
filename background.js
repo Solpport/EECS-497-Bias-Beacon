@@ -22,19 +22,47 @@ const OPENAI_MODEL = "gpt-4o-mini";
 const CLASSIFICATION_BATCH_SIZE = 50;
 const MAX_CONCURRENT_BATCHES = 3;
 
-const VALID_CATEGORIES = new Set(["emotional", "exaggeration", "stereotype", "generalization", "false-equivalence"]);
+const ALL_CATEGORIES = [
+  "emotional_language",
+  "exaggeration",
+  "stereotype",
+  "generalization",
+  "false_equivalence"
+];
 
-function buildPrompt(sentences) {
+async function getSettings() {
+  const result = await chrome.storage.sync.get("settings");
+  return result.settings || {};
+}
+
+function getSensitivityInstruction(sensitivity) {
+  if (sensitivity === "low") {
+    return "Only flag sentences with clear, obvious, and strong bias. Err on the side of NOT flagging.";
+  }
+  if (sensitivity === "high") {
+    return "Flag any sentence that could potentially contain bias, even if subtle or implicit. Be thorough.";
+  }
+  return "Flag sentences that contain biased or emotionally loaded language.";
+}
+
+function getEnabledCategories(settings) {
+  const cats = settings?.categories;
+  if (!cats) {
+    return ALL_CATEGORIES;
+  }
+  return ALL_CATEGORIES.filter((key) => cats[key] !== false);
+}
+
+function buildPrompt(sentences, settings) {
+  const sensitivity = settings?.sensitivity || "medium";
+  const enabledCategories = getEnabledCategories(settings);
+
   return [
     "You are a language analysis tool.",
     "",
-    "Classify each sentence for biased or emotionally loaded language.",
-    "Use these bias types when a sentence is biased:",
-    "- emotional_language",
-    "- exaggeration",
-    "- stereotype",
-    "- generalization",
-    "- false_equivalence",
+    getSensitivityInstruction(sensitivity),
+    "Use ONLY these bias types when a sentence is biased:",
+    ...enabledCategories.map((cat) => `- ${cat}`),
     "",
     "Return ONLY JSON.",
     "Return one object for every sentence in the same order as the input.",
@@ -225,16 +253,19 @@ function normalizeResults(sentences, parsedResults) {
   });
 }
 
-async function classifyBatch(sentences) {
-  if (!OPENAI_API_KEY || OPENAI_API_KEY === "YOUR_OPENAI_API_KEY") {
-    throw new Error("Set your OpenAI API key in config.js before running Bias Beacon.");
+async function classifyBatch(sentences, settings) {
+  const apiKey = settings?.apiKey || OPENAI_API_KEY;
+  if (!apiKey || apiKey === "YOUR_OPENAI_API_KEY") {
+    throw new Error("Set your OpenAI API key in Settings or config.js before running Bias Beacon.");
   }
+
+  const enabledCategories = getEnabledCategories(settings);
 
   const response = await fetch(OPENAI_API_URL, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${OPENAI_API_KEY}`
+      Authorization: `Bearer ${apiKey}`
     },
     body: JSON.stringify({
       model: OPENAI_MODEL,
@@ -245,7 +276,7 @@ async function classifyBatch(sentences) {
         },
         {
           role: "user",
-          content: buildPrompt(sentences)
+          content: buildPrompt(sentences, settings)
         }
       ],
       response_format: {
@@ -263,14 +294,7 @@ async function classifyBatch(sentences) {
                     sentence: { type: "string" },
                     bias_type: {
                       type: "string",
-                      enum: [
-                        "emotional_language",
-                        "exaggeration",
-                        "stereotype",
-                        "generalization",
-                        "false_equivalence",
-                        "none"
-                      ]
+                      enum: [...enabledCategories, "none"]
                     }
                   },
                   required: ["sentence", "bias_type"],
@@ -339,7 +363,7 @@ async function mapWithConcurrency(items, concurrency, iterator) {
   return results;
 }
 
-async function classifySentences(sentences) {
+async function classifySentences(sentences, settings) {
   const batches = chunkArray(sentences, CLASSIFICATION_BATCH_SIZE);
 
   if (!batches.length) {
@@ -351,7 +375,7 @@ async function classifySentences(sentences) {
     MAX_CONCURRENT_BATCHES,
     async (batch, index) => {
       try {
-        return await classifyBatch(batch);
+        return await classifyBatch(batch, settings);
       } catch (error) {
         console.error(`Batch ${index + 1} failed, falling back to unbiased results:`, error);
         return normalizeResults(batch, []);
@@ -362,12 +386,25 @@ async function classifySentences(sentences) {
   return batchResults.flat();
 }
 
-chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message?.type === "SET_BADGE" && sender.tab) {
+    const text = message.count > 0 ? String(message.count) : "";
+    chrome.action.setBadgeText({ text, tabId: sender.tab.id });
+    chrome.action.setBadgeBackgroundColor({ color: "#1d4ed8", tabId: sender.tab.id });
+    return;
+  }
+
   if (message?.type !== "CLASSIFY_SENTENCES") {
     return;
   }
 
-  classifySentences(Array.isArray(message.sentences) ? message.sentences : [])
+  getSettings()
+    .then((settings) =>
+      classifySentences(
+        Array.isArray(message.sentences) ? message.sentences : [],
+        settings
+      )
+    )
     .then((results) => {
       sendResponse({ results });
     })

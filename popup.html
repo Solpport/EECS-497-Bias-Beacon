@@ -8,7 +8,10 @@
   </head>
   <body class="bias-beacon-popup">
     <main class="popup-card">
-      <h1>Bias Beacon</h1>
+      <div class="popup-header">
+        <h1>Bias Beacon</h1>
+        <button id="settingsButton" type="button" class="settings-link" title="Settings">&#9881;</button>
+      </div>
       <button id="analyzeButton" type="button">Analyze Page</button>
       <p id="resultText">Click the button to scan this page.</p>
       <section id="summarySection" class="summary-section" hidden>
@@ -85,6 +88,11 @@
           </div>
         </div>
       </section>
+
+      <div id="exportSection" class="export-section" hidden>
+        <button id="exportJSON" type="button" class="export-btn">Export JSON</button>
+        <button id="exportCSV" type="button" class="export-btn">Export CSV</button>
+      </div>
     </main>
     <script src="popup.js"></script>
   </body>

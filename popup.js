@@ -11,7 +11,12 @@ const falseEquivalenceCountValue = document.getElementById("falseEquivalenceCoun
 const biasLevelValue = document.getElementById("biasLevelValue");
 const biasPercentValue = document.getElementById("biasPercentValue");
 const biasScoreFill = document.getElementById("biasScoreFill");
+const settingsButton = document.getElementById("settingsButton");
+const exportSection = document.getElementById("exportSection");
+const exportJSONButton = document.getElementById("exportJSON");
+const exportCSVButton = document.getElementById("exportCSV");
 let analysisRunning = false;
+let lastAnalysisResults = null;
 
 function getBiasBarClassName(biasLevel) {
   if (biasLevel === "Low bias") {
@@ -145,7 +150,12 @@ async function analyzeActiveTab() {
       return;
     }
 
+    lastAnalysisResults = response;
     renderSummary(response);
+
+    if (exportSection && response?.detailedResults?.length) {
+      exportSection.hidden = false;
+    }
   } catch (error) {
     resultText.textContent = "Unable to analyze this page.";
     console.error("Bias Beacon analysis failed:", error);
@@ -157,4 +167,43 @@ async function analyzeActiveTab() {
 
 if (analyzeButton) {
   analyzeButton.onclick = analyzeActiveTab;
+}
+
+if (settingsButton) {
+  settingsButton.onclick = () => {
+    chrome.runtime.openOptionsPage();
+  };
+}
+
+function downloadFile(content, filename, mimeType) {
+  const blob = new Blob([content], { type: mimeType });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+if (exportJSONButton) {
+  exportJSONButton.onclick = () => {
+    if (!lastAnalysisResults?.detailedResults) {
+      return;
+    }
+    const data = JSON.stringify(lastAnalysisResults.detailedResults, null, 2);
+    downloadFile(data, "bias-beacon-results.json", "application/json");
+  };
+}
+
+if (exportCSVButton) {
+  exportCSVButton.onclick = () => {
+    if (!lastAnalysisResults?.detailedResults) {
+      return;
+    }
+    const header = "Sentence,Bias Type\n";
+    const rows = lastAnalysisResults.detailedResults
+      .map((r) => `"${r.sentence.replace(/"/g, '""')}","${r.bias_type || ""}"`)
+      .join("\n");
+    downloadFile(header + rows, "bias-beacon-results.csv", "text/csv");
+  };
 }
