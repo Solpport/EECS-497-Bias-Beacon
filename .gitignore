@@ -16,6 +16,10 @@ node_modules/
 dist/
 build/
 .vite/
+!extension/dist/
+!extension/dist/assets/
+!extension/dist/assets/popup.css
+!extension/dist/assets/popup.js
 
 .vscode/
 .idea/
@@ -24,3 +28,4 @@ build/
 Thumbs.db
 
 *.log
+.codex/
