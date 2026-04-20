@@ -19,10 +19,26 @@ importScripts("config.js");
 
 const OPENAI_API_URL = "https://api.openai.com/v1/chat/completions";
 const OPENAI_MODEL = "gpt-4o-mini";
-const CLASSIFICATION_BATCH_SIZE = 50;
-const MAX_CONCURRENT_BATCHES = 3;
+const CLASSIFICATION_BATCH_SIZE = 100;
+const MAX_CONCURRENT_BATCHES = 6;
+const SENTENCE_CACHE_KEY = "BIAS_BEACON_SENTENCE_CACHE";
+const SENTENCE_CACHE_MAX_ENTRIES = 2000;
+const SUPPORTED_BIAS_TYPES = new Set([
+  "emotional_language",
+  "exaggeration",
+  "stereotype",
+  "generalization",
+  "false_equivalence",
+  "none"
+]);
 
-const VALID_CATEGORIES = new Set(["emotional", "exaggeration", "stereotype", "generalization", "false-equivalence"]);
+const sentenceCache = new Map();
+let cacheInitialized = false;
+let cacheSaveTimer = null;
+
+function normalizeSentence(sentence) {
+  return sentence.trim().replace(/\s+/g, " ");
+}
 
 function buildPrompt(sentences) {
   return [
@@ -38,12 +54,12 @@ function buildPrompt(sentences) {
     "",
     "Return ONLY JSON.",
     "Return one object for every sentence in the same order as the input.",
-    "If a sentence is not biased, set biased to false and bias_type to null.",
+    "If a sentence is not biased, set biased to false and bias_type to none.",
     "",
     "Format:",
     "[",
     '  { "sentence": "...", "biased": true, "bias_type": "stereotype" },',
-    '  { "sentence": "...", "biased": false, "bias_type": null }',
+    '  { "sentence": "...", "biased": false, "bias_type": "none" }',
     "]",
     "",
     "Sentences:",
@@ -63,6 +79,38 @@ function extractJSONArray(text) {
   }
 
   return text.slice(start, end + 1);
+}
+
+function tryParseJSON(text) {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return null;
+  }
+}
+
+function parseClassificationResults(messageText) {
+  const strippedText = stripCodeFences(messageText);
+  const parsed = tryParseJSON(strippedText)
+    || tryParseJSON(extractJSONArray(strippedText))
+    || tryParseJSON(tryRepairTruncatedArray(strippedText));
+
+  if (Array.isArray(parsed)) {
+    return parsed;
+  }
+
+  if (parsed && Array.isArray(parsed.results)) {
+    return parsed.results;
+  }
+
+  const objectStrings = extractJSONObjectStrings(strippedText);
+  return objectStrings.reduce((results, objectText) => {
+    const item = tryParseJSON(objectText);
+    if (item) {
+      results.push(item);
+    }
+    return results;
+  }, []);
 }
 
 function tryRepairTruncatedArray(text) {
@@ -159,43 +207,6 @@ function extractJSONObjectStrings(text) {
   return objects;
 }
 
-function parseClassificationResults(messageText) {
-  const strippedText = stripCodeFences(messageText);
-
-  try {
-    return JSON.parse(strippedText);
-  } catch (error) {
-    console.warn("Initial classification JSON parse failed:", error);
-  }
-
-  const extractedArray = extractJSONArray(strippedText);
-  try {
-    return JSON.parse(extractedArray);
-  } catch (error) {
-    console.warn("Extracted classification JSON parse failed:", error);
-  }
-
-  const repairedArray = tryRepairTruncatedArray(strippedText);
-  try {
-    return JSON.parse(repairedArray);
-  } catch (error) {
-    console.warn("Repaired classification JSON parse failed:", error);
-  }
-
-  const objectStrings = extractJSONObjectStrings(strippedText);
-  const recoveredResults = objectStrings.reduce((results, objectText) => {
-    try {
-      results.push(JSON.parse(objectText));
-    } catch (error) {
-      console.warn("Skipping malformed classification object:", error);
-    }
-    return results;
-  }, []);
-
-  console.warn("Recovered classification objects:", recoveredResults.length);
-  return recoveredResults;
-}
-
 function chunkArray(array, size) {
   const chunks = [];
   for (let index = 0; index < array.length; index += size) {
@@ -204,25 +215,127 @@ function chunkArray(array, size) {
   return chunks;
 }
 
-function normalizeResults(sentences, parsedResults) {
-  const categoryMap = new Map();
-  if (Array.isArray(parsedResults)) {
-    parsedResults.forEach((r) => {
-      if (typeof r?.index === "number" && VALID_CATEGORIES.has(r.category)) {
-        categoryMap.set(r.index, { category: r.category, reason: r.reason ?? null });
-      }
-    });
-  }
-  return sentences.map((sentence, index) => {
-    const result = Array.isArray(parsedResults) ? parsedResults[index] : null;
-    const biasType = result?.bias_type || null;
-
-    return {
-      sentence,
-      biased: Boolean(biasType),
-      bias_type: biasType
-    };
+async function chromeStorageGet(keys) {
+  return new Promise((resolve) => {
+    if (!chrome?.storage?.local?.get) {
+      resolve({});
+      return;
+    }
+    chrome.storage.local.get(keys, resolve);
   });
+}
+
+async function chromeStorageSet(data) {
+  return new Promise((resolve) => {
+    if (!chrome?.storage?.local?.set) {
+      resolve();
+      return;
+    }
+    chrome.storage.local.set(data, resolve);
+  });
+}
+
+async function loadSentenceCache() {
+  if (cacheInitialized) {
+    return;
+  }
+
+  cacheInitialized = true;
+
+  try {
+    const stored = await chromeStorageGet([SENTENCE_CACHE_KEY]);
+    const raw = stored[SENTENCE_CACHE_KEY];
+    if (raw && typeof raw === "object") {
+      Object.entries(raw).forEach(([key, value]) => {
+        if (
+          value &&
+          typeof value === "object" &&
+          typeof value.bias_type === "string" &&
+          typeof value.biased === "boolean"
+        ) {
+          sentenceCache.set(key, value);
+        }
+      });
+    }
+  } catch (error) {
+    console.warn("Failed to load bias beacon cache:", error);
+  }
+}
+
+function pruneCache() {
+  while (sentenceCache.size > SENTENCE_CACHE_MAX_ENTRIES) {
+    const oldestKey = sentenceCache.keys().next().value;
+    sentenceCache.delete(oldestKey);
+  }
+}
+
+async function saveSentenceCache() {
+  if (!chrome?.storage?.local?.set) {
+    return;
+  }
+
+  pruneCache();
+  const payload = Object.fromEntries(sentenceCache);
+  try {
+    await chromeStorageSet({ [SENTENCE_CACHE_KEY]: payload });
+  } catch (error) {
+    console.warn("Failed to save bias beacon cache:", error);
+  }
+}
+
+function scheduleCacheSave() {
+  if (!chrome?.storage?.local?.set) {
+    return;
+  }
+
+  if (cacheSaveTimer) {
+    return;
+  }
+
+  cacheSaveTimer = setTimeout(() => {
+    cacheSaveTimer = null;
+    saveSentenceCache();
+  }, 500);
+}
+
+function createNeutralResults(sentences) {
+  return sentences.map(() => ({ biased: false, bias_type: null }));
+}
+
+function normalizeBiasType(value) {
+  if (typeof value !== "string") {
+    return "none";
+  }
+
+  const normalized = value.trim().toLowerCase();
+  if (normalized === "none" || normalized === "no bias" || normalized === "not biased") {
+    return "none";
+  }
+  if (normalized === "emotional_language" || normalized === "emotional" || normalized === "emotional language") {
+    return "emotional_language";
+  }
+  if (normalized === "exaggeration") {
+    return "exaggeration";
+  }
+  if (normalized === "stereotype") {
+    return "stereotype";
+  }
+  if (normalized === "generalization" || normalized === "generalisation") {
+    return "generalization";
+  }
+  if (normalized === "false_equivalence" || normalized === "false equivalence" || normalized === "false-equivalence") {
+    return "false_equivalence";
+  }
+  return "none";
+}
+
+function normalizeParsedResult(result) {
+  const biasType = normalizeBiasType(result?.bias_type);
+  return {
+    sentence: typeof result?.sentence === "string" ? result.sentence : "",
+    biased: biasType !== "none",
+    bias_type: biasType === "none" ? null : biasType
+  };
 }
 
 async function classifyBatch(sentences) {
@@ -248,41 +361,6 @@ async function classifyBatch(sentences) {
           content: buildPrompt(sentences)
         }
       ],
-      response_format: {
-        type: "json_schema",
-        json_schema: {
-          name: "bias_classification",
-          schema: {
-            type: "object",
-            properties: {
-              results: {
-                type: "array",
-                items: {
-                  type: "object",
-                  properties: {
-                    sentence: { type: "string" },
-                    bias_type: {
-                      type: "string",
-                      enum: [
-                        "emotional_language",
-                        "exaggeration",
-                        "stereotype",
-                        "generalization",
-                        "false_equivalence",
-                        "none"
-                      ]
-                    }
-                  },
-                  required: ["sentence", "bias_type"],
-                  additionalProperties: false
-                }
-              }
-            },
-            required: ["results"],
-            additionalProperties: false
-          }
-        }
-      },
       temperature: 0
     })
   });
@@ -293,28 +371,84 @@ async function classifyBatch(sentences) {
   }
 
   const data = await response.json();
-
-  const parsedContainer =
-    data?.output_parsed ??
-    data?.choices?.[0]?.message?.parsed ??
-    null;
-
-  let parsedResults = parsedContainer?.results;
+  let parsedResults = data?.output_parsed ?? data?.choices?.[0]?.message?.parsed ?? null;
 
   if (!Array.isArray(parsedResults)) {
-    const messageText = data?.choices?.[0]?.message?.content ?? "[]";
-    const fallbackParsed = parseClassificationResults(messageText);
-    parsedResults = Array.isArray(fallbackParsed?.results)
-      ? fallbackParsed.results
-      : fallbackParsed;
+    const messageText = data?.choices?.[0]?.message?.content ?? "";
+    parsedResults = parseClassificationResults(messageText);
   }
 
-  const normalizedParsedResults = (Array.isArray(parsedResults) ? parsedResults : []).map((result) => ({
-    sentence: result?.sentence ?? "",
-    bias_type: result?.bias_type === "none" ? null : result?.bias_type ?? null
-  }));
+  if (!Array.isArray(parsedResults)) {
+    return createNeutralResults(sentences);
+  }
 
-  return normalizeResults(sentences, normalizedParsedResults);
+  return parsedResults.map(normalizeParsedResult);
+}
+
+async function classifySentenceGroup(sentences) {
+  const batches = chunkArray(sentences, CLASSIFICATION_BATCH_SIZE);
+  if (!batches.length) {
+    return [];
+  }
+
+  const batchResults = await mapWithConcurrency(
+    batches,
+    MAX_CONCURRENT_BATCHES,
+    async (batch, index) => {
+      try {
+        return await classifyBatch(batch);
+      } catch (error) {
+        console.error(`Batch ${index + 1} failed, falling back to unbiased results:`, error);
+        return createNeutralResults(batch);
+      }
+    }
+  );
+
+  return batchResults.flat();
+}
+
+async function classifySentences(sentences) {
+  await loadSentenceCache();
+  if (!sentences.length) {
+    return [];
+  }
+
+  const results = new Array(sentences.length);
+  const uncachedMap = new Map();
+
+  sentences.forEach((sentence, index) => {
+    const normalized = normalizeSentence(sentence);
+    const cached = sentenceCache.get(normalized);
+    if (cached) {
+      results[index] = cached;
+      return;
+    }
+
+    if (!uncachedMap.has(normalized)) {
+      uncachedMap.set(normalized, { original: sentence, indices: [] });
+    }
+    uncachedMap.get(normalized).indices.push(index);
+  });
+
+  if (uncachedMap.size === 0) {
+    return results;
+  }
+
+  const uniqueUncachedSentences = Array.from(uncachedMap.values()).map((entry) => entry.original);
+  const normalizedKeys = Array.from(uncachedMap.keys());
+  const uniqueResults = await classifySentenceGroup(uniqueUncachedSentences);
+
+  uniqueResults.forEach((result, index) => {
+    const normalized = normalizedKeys[index];
+    const cachedResult = { biased: result.biased, bias_type: result.bias_type };
+    sentenceCache.set(normalized, cachedResult);
+    uncachedMap.get(normalized).indices.forEach((originalIndex) => {
+      results[originalIndex] = cachedResult;
+    });
+  });
+
+  scheduleCacheSave();
+  return results;
 }
 
 async function mapWithConcurrency(items, concurrency, iterator) {
@@ -337,29 +471,6 @@ async function mapWithConcurrency(items, concurrency, iterator) {
   const workerCount = Math.min(concurrency, items.length);
   await Promise.all(Array.from({ length: workerCount }, () => worker()));
   return results;
-}
-
-async function classifySentences(sentences) {
-  const batches = chunkArray(sentences, CLASSIFICATION_BATCH_SIZE);
-
-  if (!batches.length) {
-    return [];
-  }
-
-  const batchResults = await mapWithConcurrency(
-    batches,
-    MAX_CONCURRENT_BATCHES,
-    async (batch, index) => {
-      try {
-        return await classifyBatch(batch);
-      } catch (error) {
-        console.error(`Batch ${index + 1} failed, falling back to unbiased results:`, error);
-        return normalizeResults(batch, []);
-      }
-    }
-  );
-
-  return batchResults.flat();
 }
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
