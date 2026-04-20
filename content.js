@@ -81,6 +81,10 @@ if (!globalThis.__biasBeaconContentInitialized) {
       .replace(/'/g, "&#39;");
   }
 
+  function normalizeSentence(sentence) {
+    return sentence.trim().replace(/\s+/g, " ");
+  }
+
   function splitIntoSentences(text) {
     const matches = text.match(/[^.!?]+[.!?]+|[^.!?]+$/g);
     return matches ? matches.map((sentence) => sentence.trim()).filter(Boolean) : [];
@@ -127,7 +131,24 @@ if (!globalThis.__biasBeaconContentInitialized) {
     };
   }
 
-  function buildParagraphMarkup(sentences, results, startIndex, enabledCategories) {
+  function groupSentencesByNormalizedText(sentences) {
+    const normalizedToIndices = new Map();
+    const uniqueSentences = [];
+
+    sentences.forEach((sentence, index) => {
+      const normalized = normalizeSentence(sentence);
+      if (!normalizedToIndices.has(normalized)) {
+        normalizedToIndices.set(normalized, [index]);
+        uniqueSentences.push(sentence);
+      } else {
+        normalizedToIndices.get(normalized).push(index);
+      }
+    });
+
+    return { uniqueSentences, normalizedToIndices };
+  }
+
+  function buildParagraphMarkup(sentences, results, startIndex) {
     if (!sentences.length) {
       return { markup: "", flaggedCount: 0, categoryCounts: createEmptyCategoryCounts() };
     }
@@ -172,9 +193,12 @@ if (!globalThis.__biasBeaconContentInitialized) {
         enabledCategories
       );
       resultIndex += sentences.length;
-      element.innerHTML = markup;
-      totalFlagged += flaggedCount;
 
+      if (element.innerHTML !== markup) {
+        element.innerHTML = markup;
+      }
+
+      totalFlagged += flaggedCount;
       CATEGORY_KEYS.forEach((category) => {
         categoryCounts[category] += paragraphCategoryCounts[category];
       });
@@ -210,13 +234,25 @@ if (!globalThis.__biasBeaconContentInitialized) {
       };
     }
 
+    const { uniqueSentences, normalizedToIndices } = groupSentencesByNormalizedText(sentences);
     const response = await chrome.runtime.sendMessage({
       type: "CLASSIFY_SENTENCES",
-      sentences
+      sentences: uniqueSentences
     });
 
-    const results = Array.isArray(response?.results) ? response.results : [];
-    const analysis = applyClassificationResults(paragraphData, results, enabledCategories);
+    const uniqueResults = Array.isArray(response?.results) ? response.results : [];
+    const results = sentences.map(() => ({ biased: false, bias_type: null }));
+
+    uniqueSentences.forEach((sentence, index) => {
+      const normalized = normalizeSentence(sentence);
+      const result = uniqueResults[index] ?? { biased: false, bias_type: null };
+      const indices = normalizedToIndices.get(normalized) || [];
+      indices.forEach((originalIndex) => {
+        results[originalIndex] = result;
+      });
+    });
+
+    const analysis = applyClassificationResults(paragraphData, results);
     const totalSentences = sentences.length;
     const biasScore = analysis.count / totalSentences;
 
