@@ -309,6 +309,62 @@ if (!globalThis.__biasBeaconContentInitialized) {
     return true;
   });
 
+  async function tryAnalyzeOnce() {
+    try {
+      const summary = await analyzePage();
+      return summary && summary.totalSentences > 0 ? summary : null;
+    } catch (error) {
+      console.warn("Bias Beacon analyze attempt failed:", error);
+      return null;
+    }
+  }
+
+  // Runs analyzePage with time-based retries, then falls back to a
+  // MutationObserver that fires once enough paragraphs have been added.
+  // Total wall-clock budget: ~15 seconds.
+  async function runAutoAnalyzeWithRetries() {
+    const quickDelays = [0, 400, 1200, 2500, 5000];
+    for (const delay of quickDelays) {
+      if (delay) await new Promise((r) => setTimeout(r, delay));
+      if (await tryAnalyzeOnce()) return;
+    }
+
+    // Final fallback: watch the DOM for paragraphs appearing.
+    await new Promise((resolve) => {
+      let done = false;
+      let debounce = null;
+
+      const finish = () => {
+        if (done) return;
+        done = true;
+        observer.disconnect();
+        clearTimeout(hardTimeout);
+        if (debounce) clearTimeout(debounce);
+        resolve();
+      };
+
+      const attempt = async () => {
+        if (done) return;
+        if (await tryAnalyzeOnce()) finish();
+      };
+
+      const observer = new MutationObserver((mutations) => {
+        if (done) return;
+        const gotParagraph = mutations.some((m) =>
+          Array.from(m.addedNodes).some(
+            (n) => n.nodeType === 1 && (n.tagName === "P" || n.querySelector?.("p"))
+          )
+        );
+        if (!gotParagraph) return;
+        if (debounce) clearTimeout(debounce);
+        debounce = setTimeout(attempt, 600);
+      });
+
+      observer.observe(document.body, { childList: true, subtree: true });
+      const hardTimeout = setTimeout(finish, 10000);
+    });
+  }
+
   // Auto-analyze on page load if enabled in settings.
   // Retries with backoff because `document_idle` often fires before dynamic
   // content (articles, comments) is injected into the DOM.
@@ -325,14 +381,7 @@ if (!globalThis.__biasBeaconContentInitialized) {
         return;
       }
 
-      const delays = [0, 750, 2000];
-      for (const delay of delays) {
-        if (delay) await new Promise((r) => setTimeout(r, delay));
-        const summary = await analyzePage();
-        if (summary && summary.totalSentences > 0) {
-          return;
-        }
-      }
+      await runAutoAnalyzeWithRetries();
     } catch (error) {
       console.error("Bias Beacon auto-analyze failed:", error);
     }
