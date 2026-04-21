@@ -252,7 +252,7 @@ if (!globalThis.__biasBeaconContentInitialized) {
       });
     });
 
-    const analysis = applyClassificationResults(paragraphData, results);
+    const analysis = applyClassificationResults(paragraphData, results, enabledCategories);
     const totalSentences = sentences.length;
     const biasScore = analysis.count / totalSentences;
 
