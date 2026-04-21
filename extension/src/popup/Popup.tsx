@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import {
   Activity,
@@ -137,10 +137,54 @@ function LogoMark() {
   );
 }
 
+const STORAGE_PREFIX = "bias-beacon:summary:";
+
+type PersistedState = { summary: AnalysisSummary; resultText: string };
+
+async function getActiveTabUrl(): Promise<string | undefined> {
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  return tab?.url;
+}
+
+async function loadPersistedSummary(): Promise<PersistedState | null> {
+  try {
+    const url = await getActiveTabUrl();
+    if (!url) return null;
+    const key = STORAGE_PREFIX + url;
+    const stored = await chrome.storage.session.get(key);
+    const entry = stored[key] as PersistedState | undefined;
+    return entry ?? null;
+  } catch {
+    return null;
+  }
+}
+
+async function savePersistedSummary(state: PersistedState) {
+  try {
+    const url = await getActiveTabUrl();
+    if (!url) return;
+    await chrome.storage.session.set({ [STORAGE_PREFIX + url]: state });
+  } catch {
+    // best-effort
+  }
+}
+
 export function Popup() {
   const [analysisRunning, setAnalysisRunning] = useState(false);
   const [resultText, setResultText] = useState("Click the button to scan this page.");
   const [summary, setSummary] = useState<AnalysisSummary | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    loadPersistedSummary().then((entry) => {
+      if (cancelled || !entry) return;
+      setSummary(entry.summary);
+      setResultText(entry.resultText);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const normalizedSummary = summary ?? createEmptySummary();
   const biasPercent = Math.round(normalizedSummary.biasScore * 100);
@@ -210,10 +254,12 @@ export function Popup() {
         }
       };
 
+      const nextResultText = `${nextSummary.count} potentially biased sentence${
+        nextSummary.count === 1 ? "" : "s"
+      } detected.`;
       setSummary(nextSummary);
-      setResultText(
-        `${nextSummary.count} potentially biased sentence${nextSummary.count === 1 ? "" : "s"} detected.`
-      );
+      setResultText(nextResultText);
+      void savePersistedSummary({ summary: nextSummary, resultText: nextResultText });
     } catch (error) {
       console.error("Bias Beacon analysis failed:", error);
       setResultText("Unable to analyze this page.");

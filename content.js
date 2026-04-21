@@ -148,7 +148,7 @@ if (!globalThis.__biasBeaconContentInitialized) {
     return { uniqueSentences, normalizedToIndices };
   }
 
-  function buildParagraphMarkup(sentences, results, startIndex) {
+  function buildParagraphMarkup(sentences, results, startIndex, enabledCategories) {
     if (!sentences.length) {
       return { markup: "", flaggedCount: 0, categoryCounts: createEmptyCategoryCounts() };
     }
