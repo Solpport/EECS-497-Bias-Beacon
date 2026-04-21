@@ -4,7 +4,7 @@ import {
   Activity,
   ArrowRight,
   ChartColumn,
-  Sparkles,
+  Settings,
   Target,
   TriangleAlert
 } from "lucide-react";
@@ -301,12 +301,16 @@ export function Popup() {
                   </div>
                 </div>
               </div>
-              <motion.div
+              <motion.button
+                type="button"
+                aria-label="Settings"
+                title="Settings"
                 whileHover={{ y: -1 }}
-                className="rounded-2xl border border-white/10 bg-white/[0.03] p-3 text-zinc-300"
+                onClick={() => chrome.tabs.create({ url: chrome.runtime.getURL("settings.html") })}
+                className="rounded-2xl border border-white/10 bg-white/[0.03] p-3 text-zinc-300 hover:text-white"
               >
-                <Sparkles className="h-4 w-4" />
-              </motion.div>
+                <Settings className="h-4 w-4" />
+              </motion.button>
             </div>
 
             <div className="grid grid-cols-3 gap-2.5">
