@@ -169,9 +169,9 @@ function neutralResults(sentences) {
 }
 
 async function classifyBatch(sentences, settings) {
-  const apiKey = settings?.apiKey || OPENAI_API_KEY;
+  const apiKey = OPENAI_API_KEY;
   if (!apiKey || apiKey === "YOUR_OPENAI_API_KEY") {
-    throw new Error("Set your OpenAI API key in Settings or config.js before running Bias Beacon.");
+    throw new Error("Set OPENAI_API_KEY in config.js before running Bias Beacon.");
   }
 
   const enabledCategories = getEnabledCategories(settings);

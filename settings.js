@@ -1,5 +1,4 @@
 const DEFAULT_SETTINGS = {
-  apiKey: "",
   sensitivity: "medium",
   categories: {
     emotional_language: true,
@@ -16,9 +15,6 @@ const DEFAULT_SETTINGS = {
 const SENSITIVITY_LABELS = ["Low", "Medium", "High"];
 const SENSITIVITY_VALUES = ["low", "medium", "high"];
 
-const apiKeyInput = document.getElementById("apiKey");
-const toggleApiKeyButton = document.getElementById("toggleApiKey");
-const apiKeyStatus = document.getElementById("apiKeyStatus");
 const sensitivitySlider = document.getElementById("sensitivity");
 const sensitivityLabel = document.getElementById("sensitivityLabel");
 const autoAnalyzeCheckbox = document.getElementById("autoAnalyze");
@@ -47,24 +43,9 @@ function getHighlightStyleValue() {
   return checked ? checked.value : "highlight";
 }
 
-function updateApiKeyStatus(key) {
-  if (!key) {
-    apiKeyStatus.textContent = "No API key set. Will use default key if available.";
-    apiKeyStatus.className = "setting-hint status-warning";
-  } else if (key.startsWith("sk-")) {
-    apiKeyStatus.textContent = "API key is set.";
-    apiKeyStatus.className = "setting-hint status-ok";
-  } else {
-    apiKeyStatus.textContent = "API key format looks incorrect (should start with sk-).";
-    apiKeyStatus.className = "setting-hint status-error";
-  }
-}
-
 async function loadSettings() {
   const result = await chrome.storage.sync.get("settings");
   const settings = { ...DEFAULT_SETTINGS, ...result.settings };
-
-  apiKeyInput.value = settings.apiKey;
 
   const sensIndex = SENSITIVITY_VALUES.indexOf(settings.sensitivity);
   sensitivitySlider.value = sensIndex >= 0 ? sensIndex : 1;
@@ -79,8 +60,6 @@ async function loadSettings() {
   setHighlightStyleRadio(settings.highlightStyle || "highlight");
   autoAnalyzeCheckbox.checked = settings.autoAnalyze || false;
   domainWhitelistTextarea.value = settings.domainWhitelist || "";
-
-  updateApiKeyStatus(settings.apiKey);
 }
 
 function showSaveStatus(message, type) {
@@ -105,7 +84,6 @@ async function saveSettings() {
   });
 
   const settings = {
-    apiKey: apiKeyInput.value.trim(),
     sensitivity: SENSITIVITY_VALUES[sensitivitySlider.value] || "medium",
     categories,
     highlightStyle: getHighlightStyleValue(),
@@ -115,7 +93,6 @@ async function saveSettings() {
 
   await chrome.storage.sync.set({ settings });
   showSaveStatus("Settings saved!", "ok");
-  updateApiKeyStatus(settings.apiKey);
 }
 
 async function resetSettings() {
@@ -126,16 +103,6 @@ async function resetSettings() {
 
 sensitivitySlider.addEventListener("input", () => {
   sensitivityLabel.textContent = SENSITIVITY_LABELS[sensitivitySlider.value];
-});
-
-toggleApiKeyButton.addEventListener("click", () => {
-  const isPassword = apiKeyInput.type === "password";
-  apiKeyInput.type = isPassword ? "text" : "password";
-  toggleApiKeyButton.textContent = isPassword ? "Hide" : "Show";
-});
-
-apiKeyInput.addEventListener("input", () => {
-  updateApiKeyStatus(apiKeyInput.value.trim());
 });
 
 saveButton.addEventListener("click", saveSettings);
