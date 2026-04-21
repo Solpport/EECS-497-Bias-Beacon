@@ -309,7 +309,9 @@ if (!globalThis.__biasBeaconContentInitialized) {
     return true;
   });
 
-  // Auto-analyze on page load if enabled in settings
+  // Auto-analyze on page load if enabled in settings.
+  // Retries with backoff because `document_idle` often fires before dynamic
+  // content (articles, comments) is injected into the DOM.
   (async function maybeAutoAnalyze() {
     if (window !== window.top) {
       return;
@@ -322,7 +324,15 @@ if (!globalThis.__biasBeaconContentInitialized) {
       if (!isDomainWhitelisted(settings.domainWhitelist, window.location.hostname)) {
         return;
       }
-      await analyzePage();
+
+      const delays = [0, 750, 2000];
+      for (const delay of delays) {
+        if (delay) await new Promise((r) => setTimeout(r, delay));
+        const summary = await analyzePage();
+        if (summary && summary.totalSentences > 0) {
+          return;
+        }
+      }
     } catch (error) {
       console.error("Bias Beacon auto-analyze failed:", error);
     }
