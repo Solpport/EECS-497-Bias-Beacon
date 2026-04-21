@@ -358,3 +358,14 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
     chrome.action.setBadgeText({ text: "", tabId });
   }
 });
+
+// Invalidate the sentence cache whenever bias settings change.
+// Cached classifications are only valid for the category/sensitivity
+// settings that produced them — changing those must trigger reclassification.
+chrome.storage.onChanged.addListener((changes, areaName) => {
+  if (areaName !== "sync" || !changes.settings) return;
+  sentenceCache.clear();
+  if (chrome?.storage?.local?.remove) {
+    chrome.storage.local.remove(SENTENCE_CACHE_KEY);
+  }
+});
