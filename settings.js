@@ -58,8 +58,8 @@ async function loadSettings() {
   });
 
   setHighlightStyleRadio(settings.highlightStyle || "highlight");
-  autoAnalyzeCheckbox.checked = settings.autoAnalyze || false;
-  domainWhitelistTextarea.value = settings.domainWhitelist || "";
+  if (autoAnalyzeCheckbox) autoAnalyzeCheckbox.checked = settings.autoAnalyze || false;
+  if (domainWhitelistTextarea) domainWhitelistTextarea.value = settings.domainWhitelist || "";
 }
 
 function showSaveStatus(message, type) {
@@ -87,8 +87,8 @@ async function saveSettings() {
     sensitivity: SENSITIVITY_VALUES[sensitivitySlider.value] || "medium",
     categories,
     highlightStyle: getHighlightStyleValue(),
-    autoAnalyze: autoAnalyzeCheckbox.checked,
-    domainWhitelist: domainWhitelistTextarea.value.trim()
+    autoAnalyze: autoAnalyzeCheckbox ? autoAnalyzeCheckbox.checked : false,
+    domainWhitelist: domainWhitelistTextarea ? domainWhitelistTextarea.value.trim() : ""
   };
 
   await chrome.storage.sync.set({ settings });
